@@ -5,13 +5,15 @@ from tqdm import tqdm
 
 import immich
 import utils
-from config import TAG_PREFIX, SCALE, ALL_TAGS, MODEL
+from config import TAG_PREFIX, SCALE, ALL_TAGS, MODEL, MAX_INFERENCE_RETRIES
 
 register_heif_opener()
 
 MAX_FAILS = 40  # Max failures in a row until we abort.
 
-all_assets = immich.get_all_assets()
+all_assets = immich.get_all_assets(payload={"isArchived": False, "isTrashed": False})
+
+all_tags_lookup = set([x.strip().lower() for x in ALL_TAGS])
 
 # Load potentially existing albums
 existing_albums = dict()
@@ -47,25 +49,40 @@ for asset in tqdm(all_assets):
         image.thumbnail((image.width * SCALE, image.height * SCALE))
         image.save("./th.png")
 
-        response = ollama.chat(
-            model=MODEL,
-            messages=[{
-                'role': 'user',
-                'content': 'Classify the given image into one of the given categories.' +
-                           'Only respond with the exact category tag.' +
-                           'You must never respond with a non existing token!' +
-                           'Do not respond with a description or anything else than the category' +
-                           'Use only the exact category name and only ONE!' +
-                           'Pick ONE of the following categories: ' + ", ".join([f"\"{x}\"" for x in ALL_TAGS]),
-                'images': ['./th.png']
-            }],
-            options={"temperature": 0.1}
-        )
+        ai_retry = 0
+        tag = ""
+        success = False
+        while ai_retry < MAX_INFERENCE_RETRIES:
+            response = ollama.chat(
+                model=MODEL,
+                messages=[{
+                    'role': 'user',
+                    'content': 'Classify the given image into one of the given categories.' +
+                               'Only reply with the exact category tag.' +
+                               'You must never reply with a category that has not been provided below!' +
+                               'Do not reply with a description or anything else than the category' +
+                               'Use only the exact category name and only ONE!' +
+                               'Pick ONE of the following categories: ' + ", ".join([f"\"{x}\"" for x in ALL_TAGS]),
+                    'images': ['./th.png']
+                }],
+                options={"temperature": 0.1}
+            )
 
-        # Strip tailing punctuation.
-        tag = response.message.content.strip()
-        if tag.endswith('.'):
-            tag = tag[:len(tag) - 1]
+            # Strip tailing punctuation.
+            tag = response.message.content.strip()
+            if tag.endswith('.'):
+                tag = tag[:len(tag) - 1]
+
+            if tag.lower() in all_tags_lookup:
+                success = True
+                break
+
+            ai_retry += 1
+
+        if not success:
+            print(f"Not able to generate existing label for image (id = {asset_id})!")
+            fail_counter += 1
+            continue
 
         # print(tag)
 

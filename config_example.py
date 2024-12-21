@@ -17,3 +17,5 @@ ALL_TAGS = ["Holiday", "Meme", "Screenshot", "People", "Food and Drinks", "Anima
 
 # Amount of scaling that should be applied to the pictures before passing to the model.
 SCALE = 0.7
+
+MAX_INFERENCE_RETRIES = 5
